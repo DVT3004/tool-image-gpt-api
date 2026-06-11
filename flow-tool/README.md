@@ -11,9 +11,18 @@ playwright install chromium
 python gui_modern.py        # hoặc bấm run_gui_modern.bat
 ```
 
-## Tính năng
+## Thêm tài khoản
 
-- **Tạo ảnh**: nhập prompt (mỗi prompt cách nhau 1 dòng trống), chọn model / tỉ lệ /
+Repo **không** kèm tài khoản nào — tải về là trống, bạn tự thêm acc của mình:
+
+1. Chạy app → tab **Tài khoản** → **Thêm** → đăng nhập Google (mở trình duyệt) hoặc
+   **nạp cookie** (dán cookie / thả file cookie vào thư mục `cookies/`).
+2. Thông tin acc (cookie/token) được lưu cục bộ trong `accounts.json` và **không bao giờ
+   được commit lên git** (đã có trong `.gitignore`).
+
+> File `accounts.example.json` chỉ là mẫu cấu trúc trống `{"accounts": []}`.
+
+## Tính năng- **Tạo ảnh**: nhập prompt (mỗi prompt cách nhau 1 dòng trống), chọn model / tỉ lệ /
   số ảnh / số luồng / seed.
 - **Image-to-image**: chọn 1 ảnh từ máy ("Ảnh đưa vào") → tạo ảnh mới dựa trên nó
   (dùng `IMAGE_INPUT_TYPE_REFERENCE`).
