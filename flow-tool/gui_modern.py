@@ -22,9 +22,9 @@ from flow_multi import MultiFlow
 import flow_multi
 import cookie_grabber as cg
 
-# Tái dùng cấu hình/model loader từ gui.py (ASPECTS, model map, parse_count...)
-from gui import (ASPECTS, ASPECT_MAP, COUNT_CHOICES, WORKER_CHOICES, parse_count,
-                 load_model_entries, save_model_entries)
+# Cấu hình/model loader dùng chung (ASPECTS, model map, parse_count...)
+from flow_config import (ASPECTS, ASPECT_MAP, COUNT_CHOICES, WORKER_CHOICES, parse_count,
+                         load_model_entries, save_model_entries)
 
 HERE = pathlib.Path(__file__).parent
 COOKIE_FILE = HERE / "flow_cookie.txt"
