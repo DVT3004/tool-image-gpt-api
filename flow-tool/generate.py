@@ -1,24 +1,25 @@
 # -*- coding: utf-8 -*-
 """
-CLI tạo ảnh Flow.
+CLI tạo ảnh Flow - Hỗ trợ Đa tài khoản và Đa luồng.
 
-Chuẩn bị 1 lần:
-  1. Mở Brave, đăng nhập https://labs.google/fx/vi/tools/flow
-  2. F12 -> tab Network -> bấm 1 request bất kỳ tới labs.google
-     -> Headers -> Request Headers -> copy TOÀN BỘ giá trị dòng "cookie:"
-  3. Dán vào file flow_cookie.txt (cùng thư mục này)
+Chuẩn bị tài khoản:
+  Cách 1: Thả file cookie (ví dụ: acc1.txt, acc2.txt) chứa chuỗi cookie vào thư mục `cookies/`
+  Cách 2: Quản lý qua CLI `flow_cookies_cli.py` (xem hướng dẫn ở file đó)
+  Cách 3: Sử dụng GUI (`run_gui.bat`) để nạp tài khoản
 
 Chạy:
   python generate.py "a cute cat sitting on a sofa"
-  python generate.py "phong canh nui" --model NARWHAL --aspect PORTRAIT --n 2
+  python generate.py "phong canh nui" --model NARWHAL --aspect PORTRAIT --n 4 --workers 4
 """
 
 import sys
 import argparse
 import pathlib
+import time
+import random
 
-import cookie_grabber as cg
-from flow_client import FlowClient
+from flow_accounts import AccountManager
+from flow_multi import MultiFlow
 
 ASPECT_MAP = {
     "LANDSCAPE": "IMAGE_ASPECT_RATIO_LANDSCAPE",
@@ -29,80 +30,73 @@ ASPECT_MAP = {
 COOKIE_FILE = pathlib.Path(__file__).parent / "flow_cookie.txt"
 
 
-def load_cookie() -> str:
-    if not COOKIE_FILE.exists():
-        print(f"[LỖI] Chưa có file cookie: {COOKIE_FILE}")
-        print("Hãy tạo file đó và dán chuỗi cookie từ trình duyệt vào (xem hướng dẫn đầu file).")
-        sys.exit(1)
-    cookie = COOKIE_FILE.read_text(encoding="utf-8").strip()
-    if not cookie:
-        print(f"[LỖI] File cookie rỗng: {COOKIE_FILE}")
-        sys.exit(1)
-    return cookie
-
-
 def main():
-    parser = argparse.ArgumentParser(description="Tạo ảnh qua Google Labs Flow API")
+    parser = argparse.ArgumentParser(description="Tạo ảnh qua Google Labs Flow API (Đa tài khoản & Đa luồng)")
     parser.add_argument("prompt", help="Mô tả ảnh")
     parser.add_argument("--model", default="NARWHAL", help="Model ảnh (mặc định NARWHAL)")
     parser.add_argument("--aspect", default="LANDSCAPE",
                         choices=list(ASPECT_MAP.keys()), help="Tỉ lệ khung")
-    parser.add_argument("--n", type=int, default=1, help="Số ảnh")
+    parser.add_argument("--n", type=int, default=1, help="Số ảnh cần tạo")
     parser.add_argument("--seed", type=int, default=None, help="Seed (mặc định ngẫu nhiên)")
-    parser.add_argument("--project", default=None, help="projectId có sẵn (bỏ trống = tạo mới)")
-    parser.add_argument("--browsers", type=int, default=2, help="Số trình duyệt captcha")
-    parser.add_argument("--show", action="store_true", help="Hiện cửa sổ trình duyệt (debug)")
+    parser.add_argument("--workers", type=int, default=4, help="Số luồng chạy song song")
     parser.add_argument("--out", default="output", help="Thư mục lưu ảnh")
-    parser.add_argument("--grab", default=None, choices=["brave", "chrome", "edge"],
-                        help="(chế độ solver) Lấy cookie + đăng nhập sẵn cho captcha headless")
-    parser.add_argument("--mode", default="brave", choices=["brave", "solver"],
-                        help="brave = token qua Brave thật (ĐÃ HOẠT ĐỘNG); solver = headless")
     args = parser.parse_args()
 
-    auth_cookies = None
-    if args.mode == "brave":
-        # Brave thật tự lo cả token lẫn cookie -> không cần grab/cookie file
-        cookie = ""
-    elif args.grab:
-        print(f"[Flow] Lấy cookie từ {args.grab} (sẽ mở trình duyệt)...")
-        auth_cookies = cg.grab_cookies_struct(args.grab)
-        labs = {}
-        for c in auth_cookies:
-            if "labs.google" in c.get("domain", ""):
-                labs[c["name"]] = c["value"]
-        cookie = "; ".join(f"{k}={v}" for k, v in labs.items())
-        (pathlib.Path(__file__).parent / "flow_cookie.txt").write_text(cookie, encoding="utf-8")
-        print(f"[Flow] Đã lấy {len(auth_cookies)} cookie (header labs.google: {len(labs)}, "
-              f"session-token: {'__Secure-next-auth.session-token' in labs}).")
-    else:
-        cookie = load_cookie()
-
-    client = FlowClient(
-        cookie=cookie,
-        headless=not args.show,
-        num_browsers=args.browsers,
-        output_dir=args.out,
-        auth_cookies=auth_cookies,
-        token_mode=args.mode,
-    )
-
-    print("[Flow] Khởi động pool captcha...")
-    client.start()
+    mgr = AccountManager()
+    
+    # Tự động nạp cookies từ thư mục cookies/
+    mgr.autoload_cookie_files()
+    
+    # Fallback cho flow_cookie.txt cũ
+    if not mgr.accounts and COOKIE_FILE.exists():
+        cookie = COOKIE_FILE.read_text(encoding="utf-8").strip()
+        if cookie:
+            print(f"[Flow] Tự động nạp cookie từ {COOKIE_FILE} thành tài khoản 'default'...")
+            mgr.add_or_update_with_cookies("default", cookie)
+            
+    healthy = mgr.healthy_accounts()
+    if not healthy:
+        print("[LỖI] Không có tài khoản Flow nào sẵn sàng (hoặc bị cooldown/chưa đăng nhập).")
+        print("\nHướng dẫn thêm tài khoản:")
+        print("  1. Thả các file cookie vào thư mục 'cookies/' (ví dụ: cookies/acc1.txt).")
+        print("  2. Hoặc dùng CLI: python flow_cookies_cli.py import <tên_acc> --file <đường_dẫn_cookie>")
+        print("  3. Hoặc mở GUI quản lý tài khoản.")
+        sys.exit(1)
+        
+    print(f"[Flow] Đang chạy với {len(healthy)}/{len(mgr.accounts)} tài khoản sẵn sàng.")
+    
+    out_dir = pathlib.Path(args.out)
+    out_dir.mkdir(exist_ok=True, parents=True)
+    
+    # Khởi tạo MultiFlow
+    multi = MultiFlow(mgr, max_workers=args.workers)
+    
+    print(f"[Flow] Bắt đầu tạo {args.n} ảnh sử dụng tối đa {args.workers} luồng...")
+    
     try:
-        paths = client.generate_images(
+        t0 = time.time()
+        images = multi.generate(
             prompt=args.prompt,
             model=args.model,
-            aspect_ratio=ASPECT_MAP[args.aspect],
+            aspect=ASPECT_MAP[args.aspect],
             n=args.n,
             seed=args.seed,
-            project_id=args.project,
         )
-        print("\n=== HOÀN TẤT ===")
-        for p in paths:
-            print(" -", p)
+        t1 = time.time()
+        
+        print(f"\n=== HOÀN TẤT ({t1 - t0:.1f}s) ===")
+        for i, img_bytes in enumerate(images):
+            fname = out_dir / f"flow_{int(time.time())}_{i}_{random.randint(1000, 9999)}.png"
+            fname.write_bytes(img_bytes)
+            print(f" - {fname.resolve()}")
+            
+    except Exception as e:
+        print(f"[LỖI] {e}")
+        sys.exit(1)
     finally:
-        client.stop()
+        mgr.stop_all()
 
 
 if __name__ == "__main__":
     main()
+

@@ -13,3 +13,11 @@ cookies/*.txt
 cookies/*.json
 cookies/imported/
 !cookies/README.txt
+# Profile trinh duyet + log capture (CHUA TOKEN/COOKIE - tuyet doi khong commit)
+mint_data/
+manual_capture.log
+api_requests.log
+sniff_requests.log
+*.log
+models_statuses.json
+img2img_capture.log

@@ -25,7 +25,11 @@ try:
 except ImportError:
     HAS_WIN32 = False
 
-from Cryptodome.Cipher import AES
+try:
+    from Cryptodome.Cipher import AES
+except ImportError:
+    from Crypto.Cipher import AES
+
 
 LOCALAPPDATA = os.environ.get("LOCALAPPDATA", "")
 
