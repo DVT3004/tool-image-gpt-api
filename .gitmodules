@@ -1,3 +1,0 @@
-[submodule "tools/flow-captcha-solver"]
-	path = tools/flow-captcha-solver
-	url = https://github.com/sonrasa2k/flow-captcha-solver.git
