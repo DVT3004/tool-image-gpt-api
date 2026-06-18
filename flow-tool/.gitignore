@@ -21,3 +21,7 @@ sniff_requests.log
 *.log
 models_statuses.json
 img2img_capture.log
+# Dump output console - khong phai source
+_out.txt
+_out2.txt
+_out*.txt

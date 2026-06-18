@@ -433,14 +433,40 @@ class App(ctk.CTk):
             return
         acc = self.mgr.get(name) or self.mgr.add_account(
             name=name, browser=self.login_browser_var.get(), mode="manual")
+        # Chọn luôn acc này để nút "Kiểm tra đăng nhập" thao tác đúng nó.
+        self._acc_selected = acc.id
         res = self.mgr.login_account(acc.id)
         self._refresh_accounts()
         self.log(res.get("message") or res.get("error", ""),
                  "INFO" if res.get("ok") else "WARNING")
         if res.get("ok"):
+            # TỰ PHÁT HIỆN đăng nhập: chạy nền, hễ thấy đã login thì tự lưu cookie +
+            # đổi trạng thái -> không cần bấm "Kiểm tra đăng nhập" thủ công.
+            self.log(f"Đang chờ bạn đăng nhập {acc.id}... (sẽ tự nhận diện, không cần bấm gì).")
+            threading.Thread(target=self._watch_login, args=(acc.id,), daemon=True).start()
             messagebox.showinfo("Đăng nhập tay",
-                                "Đăng nhập Google + vào Flow trong cửa sổ vừa mở. Xong rồi bấm "
-                                "'Kiểm tra đăng nhập' để lưu cookie.")
+                                "Đăng nhập Google + vào Flow trong cửa sổ vừa mở.\n"
+                                "Đăng nhập xong là app TỰ nhận diện và lưu cookie "
+                                "(không cần bấm gì thêm).")
+
+    def _watch_login(self, acc_id, timeout=420, every=4):
+        """Chạy nền: định kỳ kiểm tra NHẸ cửa sổ login đang mở; hễ thấy đã đăng nhập
+        thì tự lưu cookie, đổi trạng thái sang ready và làm mới danh sách."""
+        import time as _t
+        deadline = _t.time() + timeout
+        while _t.time() < deadline:
+            try:
+                if self.mgr.poll_login_once(acc_id):
+                    self.after(0, self._refresh_accounts)
+                    self.after(0, lambda: self.log(
+                        f"{acc_id}: ĐĂNG NHẬP OK (tự nhận diện). Đã lưu cookie.", "SUCCESS"))
+                    return
+            except Exception:
+                pass
+            _t.sleep(every)
+        self.after(0, lambda: self.log(
+            f"{acc_id}: chưa thấy đăng nhập sau {timeout//60} phút. "
+            f"Đăng nhập rồi bấm 'Kiểm tra đăng nhập' nếu cần.", "WARNING"))
 
     def _build_settings_page(self):
         page = ctk.CTkFrame(self.body, fg_color="transparent")
@@ -602,7 +628,7 @@ class App(ctk.CTk):
         self.total_label.configure(text="Tổng tiến trình\n0 / 0 ảnh")
 
     # Kích thước thẻ ảnh theo tỉ lệ khung (đều nhau trong 1 lượt)
-    _BOX = {"16:9": (244, 138), "9:16": (150, 266), "1:1": (200, 200)}
+    _BOX = {"16:9": (244, 138), "9:16": (150, 266), "1:1": (200, 200), "3:4": (180, 240)}
 
     @staticmethod
     def _cover(im, W, H):
@@ -899,10 +925,17 @@ class App(ctk.CTk):
             self.log(f"Lỗi nạp: {res.get('error')}", "WARNING")
 
     def _check_login(self):
-        if not self._acc_selected:
-            messagebox.showwarning("Chọn", "Hãy bấm 'Chọn' ở 1 tài khoản trước.")
-            return
         acc_id = self._acc_selected
+        if not acc_id:
+            # Chưa bấm "Chọn" -> thử dùng tên đang nhập ở ô "Tên tài khoản".
+            name = self.acc_name.get().strip()
+            acc = self.mgr.get(name) if name else None
+            if acc:
+                acc_id = acc.id
+                self._acc_selected = acc_id
+        if not acc_id:
+            messagebox.showwarning("Chọn", "Hãy bấm 'Chọn' ở 1 tài khoản (hoặc nhập tên) trước.")
+            return
         self.log(f"Đang kiểm tra đăng nhập {acc_id}...")
 
         def run():

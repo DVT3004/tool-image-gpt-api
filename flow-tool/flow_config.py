@@ -7,11 +7,13 @@ import pathlib
 HERE = pathlib.Path(__file__).parent
 MODELS_FILE = HERE / "models.json"
 
-ASPECTS = ["16:9", "9:16", "1:1"]
+ASPECTS = ["16:9", "9:16", "1:1", "3:4"]
 ASPECT_MAP = {
     "16:9": "IMAGE_ASPECT_RATIO_LANDSCAPE",
     "9:16": "IMAGE_ASPECT_RATIO_PORTRAIT",
     "1:1": "IMAGE_ASPECT_RATIO_SQUARE",
+    # 3:4 dọc (Flow trả ảnh 896x1200). Enum lấy từ log tay batchGenerateImages.
+    "3:4": "IMAGE_ASPECT_RATIO_PORTRAIT_THREE_FOUR",
 }
 # Lựa chọn nhanh dạng x1..x4 cho Số ảnh / Số luồng
 COUNT_CHOICES = ["x1", "x2", "x3", "x4"]

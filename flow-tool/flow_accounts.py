@@ -20,6 +20,7 @@ import threading
 import subprocess
 import urllib.request
 import pathlib
+import shutil
 from typing import Optional, List, Dict, Any
 
 try:
@@ -315,6 +316,17 @@ class AccountManager:
         acc_id, i = base, 1
         while self.get(acc_id):
             i += 1; acc_id = f"{base}_{i}"
+        # Acc MỚI = PROFILE SẠCH: nếu còn thư mục login_data/<id> mồ côi (sót lại từ
+        # acc cùng tên đã xóa trước đó) -> xóa đi, nếu không Chrome sẽ mở lại profile
+        # cũ còn nguyên phiên đăng nhập Google cũ.
+        for bdir in (LOGIN_DATA, MINT_DATA):
+            stale = bdir / acc_id
+            if stale.exists():
+                try:
+                    self._kill_profile_browser(str(stale))
+                    shutil.rmtree(stale, ignore_errors=True)
+                except Exception:
+                    pass
         acc = Account({"id": acc_id, "name": name, "browser": browser, "mode": mode,
                        "profile_directory": profile_directory, "enabled": True})
         self.accounts.append(acc); self.save()
@@ -323,6 +335,17 @@ class AccountManager:
     def delete_account(self, acc_id):
         self.accounts = [a for a in self.accounts if a.id != acc_id]
         self.save()
+        # Dọn luôn PROFILE trình duyệt của acc (login_data/<id> + mint_data/<id>) để
+        # xóa hẳn phiên đăng nhập Google cũ. Nhờ vậy thêm acc mới (kể cả trùng tên)
+        # luôn được profile sạch, không mở nhầm acc cũ.
+        for bdir in (LOGIN_DATA, MINT_DATA):
+            d = bdir / acc_id
+            if d.exists():
+                try:
+                    self._kill_profile_browser(str(d))
+                    shutil.rmtree(d, ignore_errors=True)
+                except Exception:
+                    pass
 
     def set_enabled(self, acc_id, enabled):
         acc = self.get(acc_id)
@@ -427,6 +450,11 @@ class AccountManager:
         if getattr(self, "hide_browser", False) and not headless and not force_visible:
             args += ["--window-position=-32000,-32000", "--window-size=1100,800",
                      "--start-minimized"]
+        elif force_visible and not headless:
+            # Login / log tay: ÉP cửa sổ hiện rõ trên màn hình (vị trí hợp lý, KHÔNG
+            # minimize, KHÔNG đẩy ra ngoài) dù đang bật "Chạy ngầm" -> bạn nhìn thấy
+            # để đăng nhập & kiểm tra.
+            args += ["--window-position=120,80", "--window-size=1180,840"]
         if headless:
             args.append("--headless=new")
         if url:
@@ -467,9 +495,15 @@ class AccountManager:
         if not exe:
             return {"ok": False, "error": f"Không tìm thấy {acc.browser}"}
         try:
-            subprocess.Popen([exe, f"--user-data-dir={acc.login_user_data_dir}",
-                              f"--profile-directory={acc.login_profile}",
-                              "--no-first-run", "--no-default-browser-check", FLOW_URL])
+            # Mở trình duyệt RIÊNG cho acc này qua _launch: có --remote-debugging-port
+            # riêng + diệt tiến trình đang khóa đúng profile này TRƯỚC khi mở. Nhờ vậy
+            # Chrome KHÔNG forward sang cửa sổ Chrome cũ (đang đăng nhập acc khác) ->
+            # acc mới luôn hiện màn hình đăng nhập Google sạch (profile login_data/<id>
+            # còn trống). force_visible=True để cửa sổ hiện cho bạn thao tác đăng nhập.
+            port = self._acc_port(acc)
+            close = acc.browser if acc.mode == "existing" else None
+            self._launch(exe, acc.login_user_data_dir, acc.login_profile, port,
+                         FLOW_URL, headless=False, close_browser=close, force_visible=True)
             acc.status = "login_needed"
             return {"ok": True, "message": "Đăng nhập Google + mở Flow trong cửa sổ. "
                     "Xong ĐÓNG cửa sổ rồi bấm 'Kiểm tra' để lưu cookie."}
@@ -510,6 +544,32 @@ class AccountManager:
         finally:
             await pw.stop()
         return acc.logged_in
+
+    def poll_login_once(self, acc_id):
+        """Kiểm tra NHẸ 1 lần: chỉ đọc cookie từ cửa sổ login đang mở (qua CDP) rồi
+        xác thực HTTP. KHÔNG đụng tới Chrome thật (khác check_login). Dùng để TỰ
+        phát hiện đăng nhập sau khi mở cửa sổ login. Trả True nếu đã đăng nhập OK."""
+        acc = self.get(acc_id)
+        if not acc:
+            return False
+        try:
+            self._submit(self._capture_async(acc), timeout=60)
+        except Exception as e:
+            acc.last_error = str(e)
+            return False
+        if not acc.has_session_cookie:
+            return False
+        vr = self.verify_account(acc)
+        if vr.get("ok"):
+            acc.status = "ready"
+            acc.cooldown_until = 0
+            acc.failures = 0
+            acc.last_error = ""
+            if vr.get("email"):
+                acc.email = vr["email"]
+            self.save()
+            return True
+        return False
 
     def check_login(self, acc_id):
         acc = self.get(acc_id)
